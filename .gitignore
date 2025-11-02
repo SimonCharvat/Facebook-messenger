@@ -1,3 +1,6 @@
+# Icon png intermediary files
+icon.png
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
