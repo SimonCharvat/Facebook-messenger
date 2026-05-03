@@ -12,7 +12,7 @@
 import sys
 
 # Third-party libraries
-from PyQt6 import QtCore, QtGui, QtWidgets, QtWebEngineWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets, QtWebEngineWidgets, QtWebEngineCore, QtNetwork
 
 # Local modules
 pass
@@ -24,6 +24,16 @@ class MessengerWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("Messenger")
         self.resize(1000, 720)
+
+        with open("icon-fb-notification.ico", "rb") as f:
+            notification_bytes = f.read()
+
+        self.network_manager = QtNetwork.QNetworkAccessManager(self)
+
+        # Create profile and attach interceptor
+        profile = QtWebEngineCore.QWebEngineProfile.defaultProfile()
+        self.interceptor = RequestInterceptor(self)
+        profile.setUrlRequestInterceptor(self.interceptor)
 
         # Web view
         self.webview = QtWebEngineWidgets.QWebEngineView()
@@ -68,6 +78,64 @@ class MessengerWindow(QtWidgets.QMainWindow):
             else:
                 self.hide()
 
+    def update_icon_from_url(self, url: str):
+        request = QtNetwork.QNetworkRequest(QtCore.QUrl(url))
+        reply = self.network_manager.get(request)
+        reply.finished.connect(lambda: self.on_icon_downloaded(reply))
+
+    def on_icon_downloaded(self, reply: QtNetwork.QNetworkReply):
+        if reply.error() != QtNetwork.QNetworkReply.NetworkError.NoError:
+            print("Failed to download icon:", reply.errorString())
+            reply.deleteLater()
+            return
+
+        data = reply.readAll()
+
+        if is_icon_with_notification(data):
+            print("Unread messages detected")
+        else:
+            print("No unread messages")
+
+        pixmap = QtGui.QPixmap()
+        success = pixmap.loadFromData(data)
+
+        if success:
+            icon = QtGui.QIcon(pixmap)
+
+            # Update app window icon
+            self.setWindowIcon(icon)
+
+            # Update tray icon
+            self.tray_icon.setIcon(icon)
+
+            print("Icon updated successfully")
+        else:
+            print("Failed to parse downloaded icon")
+
+        reply.deleteLater()
+
+class RequestInterceptor(QtWebEngineCore.QWebEngineUrlRequestInterceptor):
+    def __init__(self, parent_window):
+        super().__init__()
+        self.parent_window = parent_window
+        self.last_icon_url = None
+
+    def interceptRequest(self, info):
+        url = info.requestUrl().toString()
+
+        if url.endswith(".ico") or ".ico?" in url:
+            if url != self.last_icon_url: # avoid repeated downloads
+                self.last_icon_url = url
+                self.parent_window.update_icon_from_url(url)
+
+
+    def is_icon_with_notification(self, incoming_bytes: bytes) -> bool:
+        """
+        Compare raw downloaded bytes with known notification icon.
+        Returns True if notification icon matches exactly.
+        """
+
+        return incoming_bytes == notification_bytes
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
